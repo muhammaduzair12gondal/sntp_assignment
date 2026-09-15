@@ -52,6 +52,26 @@ The raw file loads as a directed multigraph with 1,490 nodes and 19,090 edges. W
 
 Preprocessing collapsed parallel edges into a simple directed graph and removed 3 self-loops, yielding 19,022 simple directed edges over the same 1,490 nodes. The cleaned graph has density 0.00857, splits into 268 weakly connected components (the largest containing 1,222 nodes, or 82\% of the network) and 688 strongly connected components (largest: 793 nodes), and contains 266 fully isolated nodes. All subsequent distance-based calculations (Betweenness, community detection) use the largest weakly connected component (1,222 nodes) as the analysis graph, since distances are undefined across disconnected components; this is a standard, defensible convention that preserves 82\% of the network while ensuring every pairwise distance used in later stages is well-defined.
 
+Table~\ref{tab:preprocessing} records the main preparation decisions. No political label was used to remove nodes, select a component, choose a centrality, or tune a community partition. The labels remain attached to the nodes and are consulted only after the unsupervised partition has been produced. This separation is important because using the labels earlier would turn the community-detection task into a supervised or semi-supervised procedure and would make the later agreement scores optimistic.
+
+\begin{table}[htbp]
+\caption{Preprocessing log}
+\label{tab:preprocessing}
+\centering
+\begin{tabular}{@{}p{0.24\columnwidth}p{0.66\columnwidth}@{}}
+\toprule
+Operation & Decision and justification \\
+\midrule
+Graph type & Load as a directed multigraph because the source data contains directed hyperlink records and duplicate edges. \\
+Duplicate edges & Collapse parallel edges into one directed edge; repeated crawler records do not represent separate blog nodes. \\
+Self-loops & Remove 3 self-loops because a blog linking to itself does not connect two distinct blogs. \\
+Isolates & Retain isolates in the cleaned graph and global PageRank calculation; exclude them only from largest-component distance and community analysis. \\
+Analysis component & Use the largest weakly connected component, containing 1,222 nodes, for betweenness and Louvain. \\
+Labels & Preserve the binary political attribute for evaluation only, after community detection. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 Fig.~\ref{fig:degree} shows the in- and out-degree distributions on a log scale, exhibiting a heavy-tailed, approximately power-law shape typical of scale-free networks: most blogs have very few connections while a small number act as hubs.
 
 \begin{figure}[htbp]
@@ -78,6 +98,14 @@ Two centrality measures were selected from the allowed taught list: \textbf{Page
 PageRank was chosen because the network is directed and link-based; PageRank was purpose-built to measure authority in exactly this setting, weighting a link from an already-important blog more heavily than a link from an obscure one. It was computed on the full cleaned graph with damping factor $\alpha=0.85$ (standard default), which converged without warning.
 
 Betweenness centrality was chosen to capture brokerage rather than popularity: which blogs sit on the shortest paths connecting other blogs, and in particular, which blogs bridge the two political camps. It was computed on the largest weakly connected component only (1,222 nodes), normalized to $[0,1]$, respecting edge direction.
+
+The two measures answer complementary network questions. PageRank asks which blogs receive influential incoming attention when the importance of the source blog is taken into account. Betweenness asks which blogs occupy strategically important positions on shortest directed paths between other blogs. Degree-based measures would identify direct connectivity but would not distinguish links from prominent and peripheral sources. Eigenvector or Katz centrality could capture recursive influence, but PageRank is more directly matched to a directed hyperlink network, while betweenness provides the brokerage interpretation needed for the removal experiment.
+
+For PageRank, the score of node $i$ follows the standard random-surfer formulation
+\[
+PR(i) = \frac{1-\alpha}{N} + \alpha \sum_{j\in M(i)} \frac{PR(j)}{L(j)},
+\]
+where $M(i)$ is the set of nodes linking to $i$, $L(j)$ is the out-degree of $j$, $N$ is the number of nodes, and $\alpha=0.85$. The teleportation term ensures that the iterative calculation remains defined even when a node has no outgoing links. PageRank was calculated for all 1,490 nodes in the cleaned graph. Betweenness was calculated on the largest weakly connected component because shortest-path distances across disconnected components are undefined. The directed edge orientation was retained for this calculation: a path may follow a hyperlink from its source blog to its destination blog, but not automatically in the reverse direction.
 
 Table~\ref{tab:pagerank} and Table~\ref{tab:betweenness} show the top-10 ranked blogs under each measure.
 
@@ -149,6 +177,10 @@ Largest WCC & 1222 & 1082 & 1155 \\
 
 Targeted removal of the same number of nodes has a dramatically larger structural impact than random removal: the network fragments into 77 weakly connected components (vs.\ 4 for random removal) and loses nearly half its edges (10,082 vs.\ 17,404 remaining), confirming that betweenness-ranked nodes are structurally load-bearing.
 
+The control design is important because removing any nodes necessarily changes the number of possible node pairs and may alter density. Both intervention graphs therefore remove exactly 61 nodes from the same 1,222-node analysis graph, and the random-removal graph uses the fixed seed 42. The comparison isolates the effect of node selection: if the reduction in connectivity were caused primarily by the removal fraction, the targeted and random graphs would show similar component and community changes. Instead, the targeted graph loses substantially more edges and produces a much smaller largest component. This supports the interpretation that the selected high-betweenness nodes are not merely popular nodes but occupy positions through which many routes in the analysis graph pass.
+
+The experiment also has a deliberate scope restriction. It does not use the political label to choose removed nodes, tune the threshold, or construct the communities. The label is reserved for the evaluation stage. Consequently, the targeted-versus-random comparison tests a structural hypothesis: whether brokerage rankings alone can identify nodes whose removal changes the organization of the network.
+
 \section{Community Detection}
 Louvain modularity maximization was selected, as it assumes disjoint (non-overlapping) communities, matching the single-label ground truth, and is well-suited to large sparse networks. Louvain requires an undirected graph; edges were treated as undirected (a connection exists if a link exists in either direction), justified because community detection here concerns mutual engagement between blogs rather than directional endorsement.
 
@@ -182,6 +214,10 @@ The declared run found two dominant communities of size 631 and 529 nodes, with 
 
 Running the same Louvain procedure on the targeted- and random-removal graphs (Table~\ref{tab:louvain-removal}) shows that targeted removal fragments the network into 90 communities (vs.\ 11 originally), while random removal only mildly increases community count to 14.
 
+The transformation to an undirected graph is applied only for Louvain. A pair of blogs is treated as connected when at least one directed hyperlink exists between them, which allows the method to identify densely interlinked groups while preserving the directed graph for PageRank and betweenness. This distinction prevents the community method's input requirement from changing the interpretation of the centrality calculations. The two dominant communities are much larger than the remaining groups, so their sizes and label purities provide a useful profile of the main political structure while the small communities reveal fringe or weakly connected portions of the graph.
+
+The five-seed check provides a reproducibility diagnostic rather than a second method. Four seeds produced the same 11-community solution and modularity 0.4270, while seed 0 produced 8 communities and modularity 0.4264. The mean modularity was 0.4269 with standard deviation 0.0002. We use seed 1 as the declared run because it is representative of the majority result, and all three graph conditions use the same Louvain procedure and comparable settings.
+
 \begin{table}[htbp]
 \caption{Louvain results after node removal}
 \label{tab:louvain-removal}
@@ -200,6 +236,18 @@ Top-2 sizes & 631, 529 & 448, 351 & 614, 483 \\
 \section{Community Evaluation}
 Detected communities were evaluated against ground-truth political labels using pairwise classification over all unordered node pairs: a pair is a true positive if both nodes share a community and a political label, a true negative if they differ on both, and so on (Table~\ref{tab:confusion}). No denominator was zero in any of the three graphs. Numeric community IDs assigned by Louvain are arbitrary and carry no correspondence to the 0/1 political labels, so pairwise agreement (rather than direct ID-to-label comparison) was used specifically to avoid this label-permutation problem.
 
+For two nodes $u$ and $v$, the detected relation is ``same community'' when their Louvain IDs are equal, and the ground-truth relation is ``same orientation'' when their political values are equal. The four counts therefore have a direct interpretation: TP counts pairs grouped together and sharing an orientation; TN counts pairs separated by the partition and by orientation; FP counts pairs grouped together despite having different orientations; and FN counts same-orientation pairs that the partition separates. The reported metrics are calculated from these counts as
+\[
+\mathrm{Accuracy}=\frac{TP+TN}{TP+TN+FP+FN},\quad
+\mathrm{Precision}=\frac{TP}{TP+FP},
+\]
+\[
+\mathrm{Recall}=\frac{TP}{TP+FN},\quad
+F_1=\frac{2\,\mathrm{Precision}\,\mathrm{Recall}}
+{\mathrm{Precision}+\mathrm{Recall}}.
+\]
+This pairwise formulation remains valid when the detected number of communities differs from two. It also evaluates each removal graph only on the nodes that remain, so the targeted and random results are not artificially padded with pairs involving deleted nodes.
+
 \begin{table}[htbp]
 \caption{Pairwise evaluation results}
 \label{tab:confusion}
@@ -217,14 +265,47 @@ Modularity & 0.4270 & 0.4461 & 0.4236 \\
 \end{tabular}
 \end{table}
 
+\begin{table}[htbp]
+\caption{Pairwise confusion matrix counts}
+\label{tab:pairwise-counts}
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Count & Original & Targeted & Random \\
+\midrule
+TP & 313633 & 171356 & 278560 \\
+TN & 347141 & 316638 & 309350 \\
+FP & 25555 & 19472 & 26760 \\
+FN & 59702 & 165914 & 58710 \\
+Total pairs & 746031 & 673380 & 673380 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 On the original graph, communities agree with political orientation 88.6\% of the time (F1 = 0.880). Targeted removal of high-betweenness bridge nodes collapses accuracy to 72.5\% (F1 = 0.649), driven primarily by recall falling from 0.840 to 0.508 -- meaning same-party blogs are increasingly scattered into different small communities once bridges are removed, consistent with the 90-way fragmentation observed in Section V. Random removal of the same number of nodes leaves accuracy nearly unchanged (87.3\%), confirming the effect is specific to \emph{which} nodes are removed rather than removal size alone. Precision remains stable (0.90-0.93) across all three graphs, indicating that when nodes do share a community, they are usually genuinely same-party; the degradation under targeted removal is a recall problem, not a precision problem.
 
 Note that modularity slightly \emph{increases} after targeted removal (0.446 vs.\ 0.427) despite the network being more fragmented and less accurate against ground truth -- an important limitation, since modularity rewards tightly-knit small fragments even when they no longer reflect meaningful large-scale structure. This illustrates that modularity, an internal structural score, and pairwise accuracy against ground truth, an external validity score, can diverge, and that neither alone is sufficient to judge community quality.
+
+\section{Discussion}
+The results support a distinction between authority and brokerage. PageRank favors blogs that receive links from other influential blogs, so its ranking can be interpreted as an attention or authority measure. Betweenness instead depends on the paths connecting other nodes. A blog can therefore have a moderate PageRank but a high betweenness score if it occupies a position through which many routes pass. The different rankings are not a contradiction: they describe different structural roles. The five-node overlap between the two top-10 lists identifies blogs that are both prominent destinations and strategically positioned, while the non-overlapping entries illustrate why a single centrality measure would provide an incomplete description.
+
+The node-removal results give the strongest evidence for the brokerage interpretation. Removing only 61 of the 1,222 nodes eliminates almost half of the edges remaining in the analysis graph and increases the number of Louvain communities from 11 to 90. The random control removes the same number of nodes, yet retains 17,404 edges, a largest weakly connected component of 1,155 nodes, and only 14 detected communities. This difference indicates that the outcome depends on the structural positions of the removed nodes rather than simply on the number of deletions. In practical terms, the network's apparent ideological organization is supported by a relatively small set of connector blogs.
+
+The external metrics clarify what fragmentation means. Targeted removal reduces recall from 0.8401 to 0.5081, which means that many pairs of blogs with the same political orientation are no longer placed in the same detected community. Precision remains comparatively high at 0.8980, so a pair that remains together is still likely to share an orientation. The intervention therefore primarily breaks apart same-orientation groups rather than mixing large numbers of opposite-orientation pairs into the same group. This interpretation is consistent with the increase in the number of small communities and with the reduction in the largest component.
+
+There are several limitations to this interpretation. First, the analysis graph contains only 82\% of the cleaned nodes because disconnected components cannot be included in one largest-component distance calculation. PageRank still uses the full cleaned graph, whereas betweenness and Louvain use the largest weakly connected component; this difference is documented so that the scores are not treated as if they were calculated on identical node sets. Second, Louvain's undirected transformation removes the distinction between a link from $u$ to $v$ and a link from $v$ to $u$. That transformation is justified by the method's requirements, but it means that the resulting communities represent connected interaction rather than directional information flow.
+
+Finally, political labels are a useful ground truth for this assignment but do not prove that every hyperlink represents agreement. Blogs may link to an opposing blog in order to criticize it, quote it, or respond to it. A cross-orientation edge can therefore reflect disagreement as well as connection. The results should also be understood as a historical snapshot of the blogosphere around the 2004 election, not as a general claim about current online political networks. These limitations motivate treating the centrality and community results as structural evidence rather than direct measurements of political influence.
 
 \section{Conclusion}
 This analysis found that the political blogosphere's hyperlink structure strongly reflects real-world political alignment: Louvain community detection, using no political information, recovered two dominant communities matching the true left/right labels with over 95\% purity and an overall F1 of 0.88. PageRank and betweenness, while correlated, identified distinct classes of important nodes -- popularity leaders versus structural bridges -- and removing only the top 5\% of bridge nodes was sufficient to fragment the network and nearly halve classification performance, while an equal-size random removal had negligible effect. This indicates that a small number of structurally central blogs disproportionately determine whether the network's link structure continues to reflect political community structure.
 
 A key limitation is that a hyperlink is not necessarily an endorsement -- blogs often link to opposing viewpoints to criticize them -- so cross-community edges may partly reflect disagreement rather than genuine connection, meaning the true political separation in the network may be even sharper than the raw link structure suggests. These results also reflect a specific historical snapshot (February 2005) and may not generalize to other periods or platforms.
+
+\section{Reproducibility Note}
+All paths used by the notebook are relative to the project structure. The analysis fixes the visualization layout seed at 42, uses seeds 0 through 4 for the Louvain stability check, declares seed 1 for the reported community visualization and comparison, and uses random seed 42 for the equal-size removal baseline. The notebook is organized into data loading, graph preparation, centrality, intervention, community detection, evaluation, and visualization stages, allowing the reported tables and figures to be regenerated from the supplied graph file.
+
+The verification phrase required by the assignment is: ``Seven copper owls crossed the quiet library at noon.''
 
 \begin{thebibliography}{1}
 \bibitem{adamic2005} L. A. Adamic and N. Glance, ``The political blogosphere and the 2004 U.S. election: divided they blog,'' in \textit{Proc. 3rd Int. Workshop on Link Discovery}, 2005, pp. 36--43.
